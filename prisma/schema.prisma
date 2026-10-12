@@ -1,0 +1,121 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AnalysisStatus {
+  queued
+  processing
+  completed
+  failed
+
+  @@map("analysis_status")
+}
+
+model Video {
+  id           String     @id @default(uuid()) @db.Uuid
+  originalName String     @map("original_name")
+  storagePath  String     @map("storage_path")
+  mimeType     String     @map("mime_type")
+  sizeBytes    BigInt     @map("size_bytes")
+  durationMs   Int        @map("duration_ms")
+  width        Int
+  height       Int
+  nominalFps   Float      @map("nominal_fps")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  analyses     Analysis[]
+
+  @@map("videos")
+}
+
+model Analysis {
+  id            String             @id @default(uuid()) @db.Uuid
+  videoId       String             @map("video_id") @db.Uuid
+  video         Video              @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  status        AnalysisStatus     @default(queued)
+  progress      Int                @default(0)
+  currentStage  String?            @map("current_stage")
+  modelName     String?            @map("model_name")
+  trackerName   String?            @map("tracker_name")
+  configuration Json
+  resultSummary Json?              @map("result_summary")
+  errorCode     String?            @map("error_code")
+  errorMessage  String?            @map("error_message")
+  startedAt     DateTime?          @map("started_at")
+  completedAt   DateTime?          @map("completed_at")
+  attemptCount  Int                @default(0) @map("attempt_count")
+  claimToken    String?            @map("claim_token")
+  claimedAt     DateTime?          @map("claimed_at")
+  availableAt   DateTime           @default(now()) @map("available_at")
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+  tracks        Track[]
+  observations  TrackObservation[]
+  artifacts     Artifact[]
+
+  @@index([status, availableAt, createdAt])
+  @@index([videoId])
+  @@map("analyses")
+}
+
+model Track {
+  id                 String             @id @default(uuid()) @db.Uuid
+  analysisId         String             @map("analysis_id") @db.Uuid
+  analysis           Analysis           @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  trackerId          Int                @map("tracker_id")
+  firstSeenMs        Int                @map("first_seen_ms")
+  lastSeenMs         Int                @map("last_seen_ms")
+  observationCount   Int                @map("observation_count")
+  observedDurationMs Int                @map("observed_duration_ms")
+  averageConfidence  Float              @map("average_confidence")
+  detectionRatio     Float              @map("detection_ratio")
+  gapCount           Int                @map("gap_count")
+  minX1              Float              @map("min_x1")
+  minY1              Float              @map("min_y1")
+  maxX2              Float              @map("max_x2")
+  maxY2              Float              @map("max_y2")
+  observations       TrackObservation[]
+
+  @@unique([analysisId, trackerId])
+  @@index([analysisId])
+  @@map("tracks")
+}
+
+model TrackObservation {
+  id          String   @id @default(uuid()) @db.Uuid
+  analysisId  String   @map("analysis_id") @db.Uuid
+  analysis    Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  trackId     String   @map("track_id") @db.Uuid
+  track       Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  trackerId   Int      @map("tracker_id")
+  frameNumber Int      @map("frame_number")
+  timestampMs Int      @map("timestamp_ms")
+  x1          Float
+  y1          Float
+  x2          Float
+  y2          Float
+  confidence  Float
+
+  @@unique([analysisId, trackId, frameNumber])
+  @@index([analysisId, timestampMs])
+  @@index([trackId, timestampMs])
+  @@map("track_observations")
+}
+
+model Artifact {
+  id           String   @id @default(uuid()) @db.Uuid
+  analysisId   String   @map("analysis_id") @db.Uuid
+  analysis     Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  kind         String
+  relativePath String   @map("relative_path")
+  mimeType     String   @map("mime_type")
+  sizeBytes    BigInt   @map("size_bytes")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@unique([analysisId, kind])
+  @@map("artifacts")
+}
