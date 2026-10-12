@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Football Vision</title>
+  <style>
+    body { font-family: sans-serif; margin: 0; background: #f4f6f8; color: #17202a; }
+    main { max-width: 980px; margin: 0 auto; padding: 24px; }
+    h1 { margin-bottom: 4px; }
+    section { background: white; border: 1px solid #d8dee6; border-radius: 8px; padding: 16px; margin: 16px 0; }
+    label { display: block; margin: 8px 0; }
+    button { background: #145c3a; color: white; border: 0; border-radius: 6px; padding: 8px 14px; cursor: pointer; }
+    button:disabled { opacity: 0.6; cursor: default; }
+    .error { color: #9b1c1c; white-space: pre-wrap; }
+    .muted { color: #52606d; }
+    progress { width: 100%; height: 16px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; border-bottom: 1px solid #e4e7eb; padding: 6px; font-size: 14px; }
+    tr.clickable { cursor: pointer; }
+    video { width: 100%; max-height: 480px; background: black; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Football Vision</h1>
+  <p class="muted">Detecção e rastreamento de pessoas em vídeo de futebol gravado por celular. Não identifica nomes nem números de camisa.</p>
+  <section>
+    <h2>1. Enviar vídeo</h2>
+    <input id="file" type="file" accept="video/mp4,video/quicktime,.mp4,.mov">
+    <button id="upload">Enviar</button>
+    <pre id="video-meta"></pre>
+  </section>
+  <section>
+    <h2>2. Analisar</h2>
+    <label>Amostragem (fps) <input id="sample-fps" type="number" min="0.5" max="15" step="0.5" value="3"></label>
+    <label>Confiança mínima <input id="confidence" type="number" min="0.01" max="0.95" step="0.01" value="0.25"></label>
+    <label>Rastreador
+      <select id="tracker"><option value="botsort">botsort</option><option value="bytetrack">bytetrack</option></select>
+    </label>
+    <label><input id="annotated" type="checkbox" checked> Gerar vídeo anotado</label>
+    <button id="start" disabled>Iniciar análise</button>
+    <p id="status"></p>
+    <progress id="progress" value="0" max="100"></progress>
+    <p id="error" class="error"></p>
+  </section>
+  <section>
+    <h2>3. Tracks</h2>
+    <p id="disclaimer" class="muted"></p>
+    <table>
+      <thead><tr><th>ID</th><th>Início</th><th>Fim</th><th>Obs.</th><th>Duração observada</th><th>Confiança</th><th>Proporção</th><th>Lacunas</th></tr></thead>
+      <tbody id="tracks"></tbody>
+    </table>
+  </section>
+  <section>
+    <h2>4. Observações</h2>
+    <p id="observations-title" class="muted">Selecione um track.</p>
+    <table>
+      <thead><tr><th>Frame</th><th>Tempo</th><th>Caixa</th><th>Confiança</th></tr></thead>
+      <tbody id="observations"></tbody>
+    </table>
+  </section>
+  <section>
+    <h2>5. Vídeo anotado</h2>
+    <video id="player" controls></video>
+  </section>
+</main>
+<script>
+const state = { videoId: null, analysisId: null, timer: null };
+const $ = (id) => document.getElementById(id);
+
+async function readError(response) {
+  try {
+    const body = await response.json();
+    return body.message || JSON.stringify(body);
+  } catch {
+    return response.statusText;
+  }
+}
+
+$("upload").onclick = async () => {
+  $("error").textContent = "";
+  const file = $("file").files[0];
+  if (!file) { $("error").textContent = "Selecione um vídeo."; return; }
+  const body = new FormData();
+  body.append("file", file);
+  const response = await fetch("/api/v1/videos", { method: "POST", body });
+  if (!response.ok) { $("error").textContent = await readError(response); return; }
+  const video = await response.json();
+  state.videoId = video.videoId;
+  $("video-meta").textContent = JSON.stringify(video, null, 2);
+  $("start").disabled = false;
+};
+
+$("start").onclick = async () => {
+  $("error").textContent = "";
+  const response = await fetch(`/api/v1/videos/${state.videoId}/analyses`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      sampleFps: Number($("sample-fps").value),
+      confidenceThreshold: Number($("confidence").value),
+      tracker: $("tracker").value,
+      generateAnnotatedVideo: $("annotated").checked,
+    }),
+  });
+  if (!response.ok) { $("error").textContent = await readError(response); return; }
+  const created = await response.json();
+  state.analysisId = created.analysisId;
+  if (state.timer) clearInterval(state.timer);
+  state.timer = setInterval(poll, 2000);
+  await poll();
+};
+
+async function poll() {
+  const response = await fetch(`/api/v1/analyses/${state.analysisId}`);
+  if (!response.ok) { $("error").textContent = await readError(response); return; }
+  const analysis = await response.json();
+  $("status").textContent = `${analysis.status} · ${analysis.currentStage || ""} · tentativa ${analysis.attemptCount}`;
+  $("progress").value = analysis.progress || 0;
+  if (analysis.status === "failed") {
+    $("error").textContent = analysis.errorMessage || analysis.errorCode || "Falha.";
+    clearInterval(state.timer);
+  }
+  if (analysis.status === "completed") {
+    clearInterval(state.timer);
+    $("disclaimer").textContent = analysis.resultSummary?.metricsDisclaimer || "";
+    await loadTracks();
+    await loadVideo();
+  }
+}
+
+async function loadTracks() {
+  const response = await fetch(`/api/v1/analyses/${state.analysisId}/tracks?page=1&pageSize=100&sort=trackerId&order=asc`);
+  const body = await response.json();
+  if (!response.ok) { $("error").textContent = body.message || "Falha ao listar tracks."; return; }
+  $("disclaimer").textContent = [body.disclaimer, body.detectionRatioExplanation, body.gapDefinition].filter(Boolean).join(" ");
+  $("tracks").innerHTML = body.items.map((track) => `
+    <tr class="clickable" data-track="${track.trackerId}">
+      <td>${track.trackerId}</td>
+      <td>${track.firstSeenMs} ms</td>
+      <td>${track.lastSeenMs} ms</td>
+      <td>${track.observationCount}</td>
+      <td>${track.observedDurationMs} ms</td>
+      <td>${track.averageConfidence.toFixed(2)}</td>
+      <td>${(track.detectionRatio * 100).toFixed(1)}%</td>
+      <td>${track.gapCount}</td>
+    </tr>`).join("");
+  for (const row of document.querySelectorAll("#tracks tr")) {
+    row.onclick = () => loadObservations(row.dataset.track);
+  }
+}
+
+async function loadObservations(trackId) {
+  $("observations-title").textContent = `Track ${trackId}`;
+  const response = await fetch(`/api/v1/analyses/${state.analysisId}/tracks/${trackId}/observations?page=1&pageSize=100`);
+  const body = await response.json();
+  if (!response.ok) { $("error").textContent = body.message || "Falha ao listar observações."; return; }
+  $("observations").innerHTML = body.items.map((item) => `
+    <tr>
+      <td>${item.frameNumber}</td>
+      <td>${item.timestampMs} ms</td>
+      <td>${item.x1}, ${item.y1}, ${item.x2}, ${item.y2}</td>
+      <td>${item.confidence.toFixed(2)}</td>
+    </tr>`).join("");
+}
+
+async function loadVideo() {
+  const response = await fetch(`/api/v1/analyses/${state.analysisId}/artifacts`);
+  if (!response.ok) return;
+  const body = await response.json();
+  const video = body.items.find((item) => item.kind === "annotated_video");
+  if (video) $("player").src = video.url;
+}
+</script>
+</body>
+</html>

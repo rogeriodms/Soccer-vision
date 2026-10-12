@@ -1,0 +1,56 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: football
+      POSTGRES_PASSWORD: football
+      POSTGRES_DB: football_vision
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U football -d football_vision"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  vision:
+    build:
+      context: .
+      dockerfile: apps/vision/Dockerfile
+    env_file: .env
+    environment:
+      VISION_HOST: 0.0.0.0
+      STORAGE_ROOT: /app/storage
+      MODELS_DIR: /app/models
+      YOLO_AUTOINSTALL: "false"
+      YOLO_OFFLINE: "true"
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./storage:/app/storage
+      - ./models:/app/models
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file: .env
+    environment:
+      API_HOST: 0.0.0.0
+      DATABASE_URL: postgresql://football:football@postgres:5432/football_vision?schema=public
+      VISION_BASE_URL: http://vision:8000
+      STORAGE_ROOT: /app/storage
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      vision:
+        condition: service_started
+
+volumes:
+  pgdata:

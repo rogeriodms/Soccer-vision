@@ -1,0 +1,21 @@
+# Instale o PyTorch de CPU antes do restante, para não puxar uma wheel CUDA.
+#   pip install torch==2.14.1+cpu torchvision==0.29.1+cpu --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r apps/vision/requirements.txt
+#
+# GPU: veja o README. Não use esta lista como receita CUDA.
+
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.1+cpu
+torchvision==0.29.1+cpu
+ultralytics==8.4.175
+lap==0.5.13
+fastapi==0.143.0
+uvicorn[standard]==0.54.0
+pydantic==2.14.1
+pydantic-settings==2.15.0
+opencv-python-headless==5.0.0.93
+av==19.0.1
+numpy==2.5.2
+PyYAML==6.0.3
+pytest==9.1.1
+httpx==0.28.1

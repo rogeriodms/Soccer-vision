@@ -1,0 +1,34 @@
+{
+  "name": "football-vision",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "apps/api",
+    "packages/shared"
+  ],
+  "scripts": {
+    "build": "npm run build -w @football-vision/shared && npm run build -w @football-vision/api",
+    "dev:api": "npm run build -w @football-vision/shared && npm run dev -w @football-vision/api",
+    "dev:vision": "node scripts/run-vision.mjs",
+    "dev:worker": "npm run build -w @football-vision/shared && npm run worker -w @football-vision/api",
+    "test": "npm run build -w @football-vision/shared && npm run test:unit -w @football-vision/api",
+    "test:integration": "npm run build -w @football-vision/shared && npm run test:integration -w @football-vision/api",
+    "test:vision": "apps/vision/.venv/bin/pytest -q apps/vision/tests",
+    "test:all": "npm run test && npm run test:integration && npm run test:vision",
+    "db:generate": "prisma generate --schema prisma/schema.prisma",
+    "db:migrate": "prisma migrate deploy --schema prisma/schema.prisma",
+    "model:download": "python3 scripts/download_yolo_weights.py",
+    "cleanup:temp": "node scripts/cleanup-temp.mjs",
+    "postinstall": "prisma generate --schema prisma/schema.prisma"
+  },
+  "devDependencies": {
+    "prisma": "^6.16.3"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.16.3"
+  }
+}
